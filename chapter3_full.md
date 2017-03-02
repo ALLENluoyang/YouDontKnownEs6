@@ -834,3 +834,360 @@ it2.next();                // { value: 3, done: false }
 it2.next();                // { value: undefined, done: true }
 it1.next();                // { value: undefined, done: true }
 ```
+
+### Early Abort 提前中止
+
+除了调用`return(..)`，你可以调用`throw(..)`。 就像`return(x)`本质上是在当前暂停点处,将一个`return x`注入到生成器中，调用`throw(x)`本质上就像在暂停点处注入一个`throw x`。
+
+除了异常行为（我们涵盖了下一节中`try`子句的含义），`throw(..)`产生同样的提前完成 ，中止generator在当前暂停点的运行。 例如：
+
+
+```
+function *foo() {
+    yield 1;
+    yield 2;
+    yield 3;
+}
+
+var it = foo();
+
+it.next();                // { value: 1, done: false }
+
+try {
+    it.throw( "Oops!" );
+}
+catch (err) {
+    console.log( err );    // Exception: Oops!
+}
+
+it.next();                // { value: undefined, done: true }
+```
+
+因为`throw(..)`基本上注入了一个`throw ..`替换generator的`yield 1`行(hang)，没有处理这个异常，它将会立即传播给回调代码，它将使用`try..catch`处理它。
+
+与`return(..)`不同，迭代器的`return(..)`方法从来不会被自动调用。
+
+当然，虽然在前面的代码段中没有展示，但是当你调用`throw(..)`时，如果`try..finally`子句在`generator` 内部等待，则在异常传播给回调代码之前,`finally`子句将被给予一个完成的机会,。
+
+## Error Handling 错误处理
+
+正如我们已经提示的，生成器的错误处理可以用`try..catch`来表示，它在进入和返回方向都可以起到作用：
+
+```
+function *foo() {
+    try {
+        yield 1;
+    }
+    catch (err) {
+        console.log( err );
+    }
+
+    yield 2;
+
+    throw "Hello!";
+}
+
+var it = foo();
+
+it.next();                // { value: 1, done: false }
+
+try {
+    it.throw( "Hi!" );    // Hi!
+                        // { value: 2, done: false }
+    it.next();
+
+    console.log( "never gets here" );
+}
+catch (err) {
+    console.log( err );    // Hello!
+}
+```
+错误也可以通过`yield *`委托在两个方向传播：
+```
+function *foo() {
+    try {
+        yield 1;
+    }
+    catch (err) {
+        console.log( err );
+    }
+
+    yield 2;
+
+    throw "foo: e2";
+}
+
+function *bar() {
+    try {
+        yield *foo();
+
+        console.log( "never gets here" );
+    }
+    catch (err) {
+        console.log( err );
+    }
+}
+
+var it = bar();
+
+try {
+    it.next();            // { value: 1, done: false }
+
+    it.throw( "e1" );    // e1
+                        // { value: 2, done: false }
+
+    it.next();            // foo: e2
+                        // { value: undefined, done: true }
+}
+catch (err) {
+    console.log( "never gets here" );
+}
+
+it.next();                // { value: undefined, done: true }
+```
+当`*foo()`调用`yield 1`时，值`1`通过`*bar()`不变，正如我们已经看到的。
+
+但是这段代码最有趣的是当`*foo()`调用`throw "foo: e2"`时，这个错误传播到`*bar()`，并立即被`*bar()`的`try..catc`h块捕获。 错误不会像值`1`通过`*bar()`。
+
+`*bar()`的`catch`接着正常的输出`err ("foo: e2") `，然后`*bar()`正常结束，这就是为什么，从`it.next()`返回的迭代器结果是`{ value: undefined, done: true }`。
+
+如果`*bar()`没有一个`try..catch`在`yield * ..`表达式周围，错误会自然传播出来，在途中它仍然会完成（终止）`*bar()`.
+
+
+## Transpiling a Generator 转换 Generator
+
+在ES6之前，是否可以表示Generator的功能？ 事实证明，是可行的，因为有几个伟大的工具，这样做，包括最突出的`Facebook`的`Regenerator`工具（https://facebook.github.io/regenerator/）。
+
+但只是为了,更好地了解`Generator`，让我们试着,手动转换。 基本上，我们将创建一个简单的,基于闭包的,状态机。
+
+我们将保持generator源代码很简单：
+
+```
+function *foo() {
+    var x = yield 42;
+    console.log( x );
+}
+```
+
+首先，我们需要一个可以执行的函数`foo()`，它需要返回一个迭代器：
+
+```
+function foo() {
+    // ..
+
+    return {
+        next: function(v) {
+            // ..
+        }
+
+        // we'll skip `return(..)` and `throw(..)`
+    };
+}
+```
+
+现在，我们需要一些`内部变量`来跟踪我们在"generator"'逻辑的步骤中的位置。 我们称它为`状态`(`state`)。 这将有三个状态：`0`,最初，`1`,等待满足`yield`表达式，`2`,生成器立即完成。
+
+每次调用`next(..)`，我们需要处理下一步，然后增加`state`。 为了方便起见，我们将每个步骤放在`switch`语句的`case`子句中，我们将在`next(..)`可调用的内部函数`nextState(..)`中保存。 另外，因为`x`是` "generator," `的整个范围上的变量，所以它需要放在``nextState(..)``函数之外。
+
+这里是完整的（显然有点简化，为了保持概念图更清楚）：
+
+```
+function foo() {
+    function nextState(v) {
+        switch (state) {
+            case 0:
+                state++;
+
+                // the `yield` expression
+                return 42;
+            case 1:
+                state++;
+
+                // `yield` expression fulfilled
+                x = v;
+                console.log( x );
+
+                // the implicit `return`
+                return undefined;
+
+            // no need to handle state `2`
+        }
+    }
+
+    var state = 0, x;
+
+    return {
+        next: function(v) {
+            var ret = nextState( v );
+
+            return { value: ret, done: (state == 2) };
+        }
+
+        // we'll skip `return(..)` and `throw(..)`
+    };
+}
+```
+
+最终，我们来测试ES6之前版本的`"generator"`.
+
+```
+var it = foo();
+
+it.next();                // { value: 42, done: false }
+
+it.next( 10 );            // 10
+                        // { value: undefined, done: true }
+```
+
+不错吧，嗯哼？ 希望这个练习在你的脑海中巩固了`generators`实际上只是`状态机`逻辑的简单语法。这使它们广泛适用.
+
+
+
+## Generator Uses
+所以，现在我们更深刻地了解generators是如何工作的，它们有什么用处？
+
+我们已经看到了两种主要`模式`：
+
+*生成一系列值*：此用法可以是简单的（例如，随机字符串或递增的数字），或者它可以表示更多结构化数据访问（例如，对从数据库查询返回的数据进行迭代）。
+
+无论哪种方式，我们使用iterator来控制generator，以便可以为每次调用`next(..)`调用一些逻辑。数据结构上的正常迭代器,仅仅拉取值,而没有任何控制逻辑。
+
+*任务的队列串行执行*：此用法通常表示算法中的步骤的流控制，其中每个步骤都需要从某个外部源检索数据。每条数据的满足可以是立即的，或者可以,被异步地延迟。
+
+从生成器内部的代码的角度来看，在屈服点处的,同步或异步的细节,是完全不透明的。此外，这些细节,被有意地抽象掉，例如不会隐藏具有这样的自然顺序表达步骤的实现并发症。抽象也意味着实现可以经常`交换/重构`，而不触及generator 中的代码。
+
+当根据这些用途来观察generators时，它们对于手动状态机，变得不仅仅是不同，而是更好的语法。它们是用于组织和控制有序生产和迭代数据的强大抽象工具。
+
+## Modules
+我不认为这是一个夸张的建议，JavaScript所有的模式中唯一最重要的代码组织模式，是，并始终是，模块。 对于我自己，我认为对于社区的大部分人，`模块模式`驱动了绝大多数代码。
+
+## The Old Way
+
+```
+function Hello(name) {
+    function greeting() {
+        console.log( "Hello " + name + "!" );
+    }
+
+    // public API
+    return {
+        greeting: greeting
+    };
+}
+
+var me = Hello( "Kyle" );
+me.greeting();            // Hello Kyle!
+```
+
+这个`Hello(..)`模块，可以通过调用后续次数，产生多个实例。 有时，模块只被称为单例（即，它只需要一个实例），在这种情况下，使用`IIFE`的以前的代码段的一个小的变化是常见的：
+
+```
+var me = (function Hello(name){
+    function greeting() {
+        console.log( "Hello " + name + "!" );
+    }
+
+    // public API
+    return {
+        greeting: greeting
+    };
+})( "Kyle" );
+
+me.greeting();            // Hello Kyle!
+```
+
+这种模式被尝试过和测试过了。 它还具有足够的灵活性，可以针对多种不同的场景拥有各种各样的变化。
+
+其中最常见的是异步模块定义（AMD），另一种是通用模块定义（UMD）。 我们不会在这里介绍这些模式和技术的细节，但它们在很多在线方面具有广泛解释。
+
+## Moving Forward
+从ES6开始，我们不再需要`依赖封装函数`和`闭包`为我们提供`模块支持`。 ES6模块具有一流的`语法`和`功能支持`。
+
+在我们了解特定的语法之前，重要的是要了解ES6模块与过去处理模块的一些相当重要的概念差异：
+
+ES6使用`基于文件`的模块，意味着`每个文件一个模块`。此时，没有将`多个模块组合`成`单文件`的标准化方法。
+
+这意味着如果要将ES6模块直接加载到浏览器Web应用程序中，您只能单独加载它们，而不是作为，性能优化工作，常见的，单个文件中的，大包。
+
+预期`HTTP/2`的同时出现将显着地减轻任何这样的性能问题，因为它在持久`套接字`连接上操作，并且因此可以,非常有效地,并行地,并且彼此交织地,加载,许多较小的文件。
+
+ES6模块的`API`是`静态的`。也就是说，`静态地定义`模块的公共`API`上的所有`top-level exports` ，并且稍后不能对其进行修改。
+
+一些使用习惯于能够提供`动态API`定义，其中可以响应于运行时条件来`添加/移除/替换`方法。这些用途必须更改以适应ES6静态`API`，否则它们必须限制对`二级对象`的`属性/方法`的动态更改。
+
+ES6模块是`单例`。也就是说，只有一个模块的实例，保持其状态。每次将该模块,导入到另一个模块时，都将获得对一个集中实例的引用。如果你想生产多个`模块`实例，你的`模块`将需要供给某种工厂来做。
+在模块的公共`API`上公开的属性和方法不仅仅是`值`或`引用`的正常赋值。它们是内部模块定义中的`标识符`的实际绑定（几乎类似于`指针`）。
+
+在ES6之前的模块中，如果你在公共`API`上放置一个属性，该属性包含一个原始值，比如数字或字符串，那么该属性赋值是通过值复制的，对应变量的任何内部更新都是`独立的`，不会影响公共副本上的`API对象`。
+
+使用ES6，导出一个`本地私有变量`，即使它当前持有一个原始`字符串/数字/etc`，也会导出一个变量的绑定。如果模块更改变量的值，则`外部导入绑定`现在将解析为该`新值`。
+
+导入模块与静态请求加载模块（如果尚未加载）相同。如果您在浏览器中，这意味着网络上的`阻塞负载`。如果你在服务器（即`Node.js`），它是从文件系统的`阻塞加载`。
+
+然而，不要担心`性能的影响`。由于ES6模块具有静态定义，因此可以静态扫描导入要求，即使在使用模块之前，也会`预加载`。
+
+ES6实际上没有指定或处理这些加载请求如何工作的`机制`。有一个单独的`模块加载器`的概念，其中每个`托管环境`（浏览器，`Node.js`等）提供适合于环境的默认加载器。模块的`导入`使用字符串值来表示`模块`（URL，文件路径等）的位置，但是这个值在程序中是不透明的，只对`Loader`本身有意义。
+
+你可以定义自己的`自定义Loader`，如果你想要更`细粒度的`控制比默认的`Loader`提供 - 这基本上没有，因为它从程序的代码z中完全隐藏。
+
+正如您所看到的，ES6模块将提供封装组织代码的全部用例，控制公共`API`和引用`依赖项导入`。但是他们有一个这样做的非常特别的方式，这与你已经做了模块多年可，能或不可能有着非常密切地的关系。
+
+## CommonJS
+
+有一个熟悉的，但不完全兼容的，模块语法，称为`CommonJS`，这是`Node.js生态系统`中,被人门所熟悉的。
+
+由于缺乏一个更有说服力的方式来说这件事，从长远来看，ES6模块本质上必然取代所有以前的模块的`格式`和`标准`，甚至`CommonJS`，因为它们建立在语言的`语法支持`之上。这将，在时间上，不可避免地,赢得作为优越的方法，如果没有其他无处不在的原因。
+
+然而，这一点，我们面对一条，相当长的路要走到。在服务器端`JavaScript世界中`有数十万个`CommonJS`样式模块，并且是浏览器世界中不同格式标准（UMD，AMD，ad hoc）的许多模块的`10`倍。转型需要多年才能取得重大进展。
+
+在过渡期间，模块 `transpilers/converters`(转换器)将是绝对必要的。你可能只是习惯了那个新的实现。无论您是在常规模块，AMD，UMD，CommonJS或ES6中编写，这些工具都必须解析并转换为适合您代码运行环境的格式。
+
+对于`Node.js`，这可能意味着（目前）目标是`CommonJS`。对于浏览器，它可能是UMD或AMD。在接下来的几年里，随着这些工具的成熟和最佳实践的出现，预计会有大量的流量。
+
+从这里开始，我对模块的最好的建议是：无论什么形式，你已经虔诚地感受到了强烈的亲和力，也表现赞赏和理解ES6模块，如他们，并让你的其他模块褪色。它们是`JS`模块的未来，即使这种实现有点不好。
+
+
+## 新的方式
+启用ES6模块的两个主要的新关键字是`import` (导入)和`export`(导出)。 语法有很多`细微差别`，让我们进一步看看。
+
+警告：一个很容易忽略的,重要细节：`import `和`export`必须,始终显示在,其各自用法的,顶级范围中。 例如，不能在`if`条件中放置`import `或`export`; 它们必须放在所有`块`和`函数`之外。
+
+### `exporting` API Members  导出API成员
+
+`export`关键字要么放在`声明之前`，要么作为`运算符`（排序）使用要`export`的`特定绑定列表`。 试想一下：
+
+```
+export function foo() {
+    // ..
+}
+
+export var awesome = 42;
+
+var bar = [1,2,3];
+export { bar };
+```
+相同的表达`exports`的方法:
+
+```
+function foo() {
+    // ..
+}
+
+var awesome = 42;
+var bar = [1,2,3];
+
+export { foo, awesome, bar };
+```
+这些都称为 *命名导出( named export)*   ，因为您实际上导出`变量/函数/等`的`名称绑定`。
+
+任何你不标记`export`,会在模块的范围内保持`private`。 也就是说，尽管` var bar = ..`看起来像是在顶级全局范围声明，`顶级范围`实际上是`模块`本身; 模块中没有`全局范围`。
+
+注意：模块仍然可以访问`window`和所有的"globals" ，挂起它，只是不是作为词汇顶级范围。 但是，你真的应该远离全局模块，如果可能的话。
+
+您还可以在命名导出期间对模块成员进行“重命名”（也称为别名）：
+
+```
+function foo() { .. }
+
+export { foo as bar };
+```
