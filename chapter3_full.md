@@ -1613,3 +1613,381 @@ Reflect.Loader.import( "foo", { address: "/path/to/foo.js" } )
 这是充满期待的，定制将被提供（通过某种方式）用于挂载到加载模块的过程中，其中在加载之后，但在引擎编译模块之前，可以进行` translation/transpilation`。
 
 例如，您可以加载不符合ES6的模块格式（例如，CoffeeScript，TypeScript，CommonJS，AMD）。 然后，您的翻译步骤可以将其转换为符合ES6的模块，以供引擎处理。
+
+## Classes
+
+从JavaScript的开始，语法和开发模式都尽最大努力（读作：struggled），以支持独立的面向类开发。有了像`new `和`instanceof`和一个`.constructor`属性，谁不是情不自禁的认为，JS有类，隐藏在原型系统内的某处？
+
+当然，JS的`“classes”`与经典`类`几乎不相同。差异是有据可查的，所以我不会在这里进一步讨论这一点。
+
+注意：要了解有关在假冒“classes”时使用的模式的更多信息，以及称为“委托”的原型的另一种视图，请参阅本系列的此系列的`this & Object Prototypes`标题的下半部分。
+
+### 类
+
+虽然JS的原型机制的作用不像传统`类`一样，但这并不能阻止对语言扩展语法糖的强烈需求，使表达“classes”看起来更像真正的`类`。引入ES6 `class `关键字及其关联机制。
+
+这个特性是一个高度争议和引人注目的辩论的结果，并且代表一个，从几个强烈反对如何处理JS类的观点，折衷的较小的子集。大多数开发人员想要在JS中使用完整的类，会发现新语法的部分内容非常吸引人，但会发现重要的部分仍然缺失。不过不要担心。 `TC39`已经在开发额外的功能来增强ES6版本后的时间框架中的类。
+
+新的ES6类机制的核心是`class`关键字，它标识一个`块`，其中内容定义了函数原型的成员。试想一下：
+
+```
+class Foo {
+    constructor(a,b) {
+        this.x = a;
+        this.y = b;
+    }
+
+    gimmeXY() {
+        return this.x * this.y;
+    }
+}
+```
+有些事情要注意：
+
+- `class Foo`意味着创建一个名为`Foo`的（特殊的）函数，很像ES6之前的版本。
+- `constructor(..)`标识`constructor(..)`函数的签名，以及它的主体内容。
+- 类方法使用可用于对象字面量的,相同如第2章所述的“简明方法”语法。这还包括本章前面讨论的简洁`generator `形式，以及ES5 getter / setter语法。 但是，类方法是不可枚举的，而对象方法默认是可枚举的。
+- 与对象字面量不同，类体中没有逗号分隔成员！ 事实上，他们甚至不允许。
+
+前面代码片段中的类语法定义可以粗略地认为是这个ES6版本之前的的等价物，在那些已经完成的原型样式编码之前，这可能看起来相当熟悉：
+
+```
+function Foo(a,b) {
+    this.x = a;
+    this.y = b;
+}
+
+Foo.prototype.gimmeXY = function() {
+    return this.x * this.y;
+}
+```
+
+在前ES6形式或新的ES6类形式，这个“类”现在可以实例化和使用，正如你所期望的：
+
+```
+var f = new Foo( 5, 15 );
+
+f.x;                        // 5
+f.y;                        // 15
+f.gimmeXY();                // 75
+```
+
+警告！虽然`class Foo`看起来很像函数`function Foo()`，但他们有重要的区别：
+
+- `class Foo`的`Foo(..) `调用必须使用`new`，因为`Foo.call( obj )`的ES6的之前版本选项将不起作用。
+- 虽然`function Foo`“被提权”（参见本系列的范围和封闭标题），但`class Foo`不是; `extends ..`子句指定一个不能“被提权”的表达式。所以，你必须先声明一个类，然后才能实例化它。
+- 顶级全局作用域中的`class Foo`在该作用域中创建一个词法`Foo`标识符，但不同于`function Foo`,她不会创建该名称的全局对象属性。
+
+
+建立的`instanceof`运算符仍然适用于ES6类，因为类只是创建了同名的构造函数。但是，ES6引入了一种使用`Symbol.hasInstance`（请参阅第7章中的“Well-Known Symbols”）来定制`instanceo`f如何发挥作用的方法。
+
+另一种思考类的方法，我觉得更方便，是一个用于自动填充`原型`对象的宏。可选地，如果使用`extends`，它也连接`[[Prototype]]`关系（参见下一部分）。
+
+ES6类实际上不是一个实体本身，而是一个包围其他具体实体的元概念，例如函数和属性，并将它们绑定在一起。
+
+提示：除了声明形式，一个类也可以是一个表达式，如：`var x = class Y { .. }`。这主要用于将类定义（技术上，构造函数本身）作为函数参数或将其分配给对象属性。
+
+`extends `and `super`
+
+ES6类还具有用于在两个函数原型之间建立`[[Prototype]]`委托链接的语法糖 - 通常使用面向类别的熟悉术语扩展的错误标记的`“extends”`或混淆地标记为`“原型继承”`
+
+```
+class Bar extends Foo {
+    constructor(a,b,c) {
+        super( a, b );
+        this.z = c;
+    }
+
+    gimmeXYZ() {
+        return super.gimmeXY() * this.z;
+    }
+}
+
+var b = new Bar( 5, 15, 25 );
+
+b.x;                        // 5
+b.y;                        // 15
+b.z;                        // 25
+b.gimmeXYZ();               // 1875
+```
+一个重要的新增加的关键字是`super`，这实际上在pre-ES6是`直接不可能的`（除了有一些打破权衡）。 在构造函数中，`super`自动引用`“父构造函数”`，在前面的示例中是`Foo(..)`。 在一个方法中，它引用`“父对象”`，这样你可以访问它一个属性/方法，如super.gimmeXY()。
+
+`Bar extends Foo`当然意味着将`Bar.prototype`的`[[Prototype]]`链接到`Foo.prototype`。 所以，方法中的`super `像`gimmeXYZ()`方法，特殊的意义是`Foo.prototype`，而当在`Bar`构造函数中使用时，`super`意味着`Foo`。
+
+注意：`super`不限于类声明。 它也适用于对象字面量，与我们在这里讨论的方式大致相同。 有关详细信息，请参阅第2章中的“Object `super`”。
+
+
+## There Be `super` Dragons
+
+注意到`super`行为根据它出现的位置而有所不同,并不是无关紧要。公平的，大多数时候，这不会是一个问题。但是，如果你偏离狭窄的规范，惊喜等待着。
+
+可能存在这样的情况，在构造函数中，您将要引用`Foo.prototype`，例如直接访问它的一个`属性/方法`。但是，`super`在构造函数中不能以这种方式使用; `super.prototype`将不起作用。 `super(..)`意味着大致调用新的`Foo(..)`，但实际上不是一个可用的`Foo`本身的引用。
+
+对称地，您可能需要在非构造函数方法中引用`Foo(..)`函数。 `super.constructor`将指向`Foo(..)`函数，但要注意，此函数只能使用`new`来调用。`new super.constructor(..)`将是有效的，但它在大多数情况下,不会非常有用，因为你不能使该调用,使用或引用,当前的这个对象上下文，这可能是你想要的。
+
+此外，`super `看起来像它可能由一个函数的上下文驱动的，就像这样 - 也就是说，它们都是动态绑定的。然而，`super `不是`this`这样的动态。当构造函数或方法在声明（在`class `中）内部构造`super `引用时，该`super `静态地绑定到该特定类层次结构，并且不能被覆盖（至少在ES6中）。
+
+这意味着什么？这意味着如果你在习惯上通过覆盖他们的的`this`,从one “class”拿，或从其他的类中“借”，调用`call(..)`或`apply(..)`，这可能很好，如果你所借的方法有一个`super `的话，就会产生惊喜。考虑这个类层次结构：
+
+```
+class ParentA {
+    constructor() { this.id = "a"; }
+    foo() { console.log( "ParentA:", this.id ); }
+}
+
+class ParentB {
+    constructor() { this.id = "b"; }
+    foo() { console.log( "ParentB:", this.id ); }
+}
+
+class ChildA extends ParentA {
+    foo() {
+        super.foo();
+        console.log( "ChildA:", this.id );
+    }
+}
+
+class ChildB extends ParentB {
+    foo() {
+        super.foo();
+        console.log( "ChildB:", this.id );
+    }
+}
+
+var a = new ChildA();
+a.foo();                    // ParentA: a
+                            // ChildA: a
+var b = new ChildB();       // ParentB: b
+b.foo();                    // ChildB: b
+```
+
+如你所见，`this.id`引用动态反弹，因此`：a`据考察在两种情况下，而不是`：b`。但是`b.foo()`的`super.foo()`引用没有动态反弹，所以它仍然被视为`ParentB`而不是期望的`ParentA`。
+
+因为`b.foo()`引用了`super`，它静态绑定到`ChildB / ParentB`层次结构，不能针对`ChildA / ParentA`层次结构使用。对于这个限制ES6没有解决方案。
+
+`super `似乎直观地工作，如果你有一个静态类层次结构，没有交叉授粉。但是公平起见，做这种感知编码的主要好处之一就是这种灵活性。简单地说，`class + super`需要你规避这样的技术。
+
+选择归结为，缩小你对这些静态层次结构对象设计 - `class`，`extends`和`super `将是相当不错的 - 或放弃所有尝试“假”类，而不是拥抱动态和灵活，无类的对象和`[[Prototype]]`代理（参见本系列的`this＆Object Prototypes`标题）。
+
+### 子类构造函数
+
+类或子类不需要构造函数;如果省略，则在两种情况下替换默认构造函数。然而，默认的替换构造函数对于直接类和扩展类是不同的。
+
+具体来说，默认的子类构造函数会自动调用父构造函数，并传递任何参数。换句话说，你可以认为默认的子类构造函数是这样的：
+
+```
+constructor(...args) {
+    super(...args);
+}
+```
+这是一个重要的细节要注意。 不是所有的类语言都有子类构造函数自动调用父构造函数。 C ++可以，但Java不行。 但更重要的是，在`pre-ES6`类中，这种自动的“父构造函数”调用不会发生。 转换到ES6类时要小心，如果你一直依赖这样的一直不发生的调用。
+
+另一个也许令人惊讶的`偏差/限制`的ES6子类构造函数：在子类的构造函数中，您不能访问`this`直到`super(..)`已被调用。 原因比较微妙和复杂，但它归结为事实，父构造函数实际上是一个`创建/初始化`你的实例的`this`。 `Pre-ES6`，它的作用恰恰相反; 这个对象是由“子类构造函数”创建的，然后你调用一个“父构造函数”与“子类”的`this`上下文。
+
+让我们来说明。 在`pre-ES6`的作用：
+
+```
+function Foo() {
+    this.a = 1;
+}
+
+function Bar() {
+    this.b = 2;
+    Foo.call( this );
+}
+
+// `Bar` "extends" `Foo`
+Bar.prototype = Object.create( Foo.prototype );
+```
+但是ES6等效项不允许使用：
+
+```
+class Foo {
+    constructor() { this.a = 1; }
+}
+
+class Bar extends Foo {
+    constructor() {
+        this.b = 2;         // not allowed before `super()`
+        super();            // to fix swap these two statements
+    }
+}
+```
+
+在这种情况下，修复很简单。 只需交换在子类`Bar`构造函数中的两个语句。 然而，如果你一直依靠ES6之前的能力来跳过调用“父构造函数”，请小心，因为这将不再允许。
+
+`extend`ing Natives
+
+对new `class` 和`extend` 设计最有希望的好处之一是能够（最终！）子类的本地内置，如`Array`。 试想一下：
+
+```
+class MyCoolArray extends Array {
+    first() { return this[0]; }
+    last() { return this[this.length - 1]; }
+}
+
+var a = new MyCoolArray( 1, 2, 3 );
+
+a.length;                   // 3
+a;                          // [1,2,3]
+
+a.first();                  // 1
+a.last();                   // 3
+```
+在ES6之前，使用手动对象创建和链接到`Array.prototype`的`Array`的一个假“子类”只是部分工作。 它错过了一个真正的数组的特殊行为，如自动更新`length `属性。 ES6子类应该完全使用如预期的“继承”和增强的行为！
+
+另一个常见的前ES6“子类”限制是使用Error对象，在创建自定义错误“子类”。 当创建正确的错误对象时，它们会自动捕获特殊的堆栈信息，包括创建错误的行号和文件。 Pre-ES6自定义错误“子类”没有这样的特殊行为，这严重限制了它们的实用性。
+
+ES6对于恢复：
+
+```
+class Oops extends Error {
+    constructor(reason) {
+        super(reason);
+        this.oops = reason;
+    }
+}
+
+// later:
+var ouch = new Oops( "I messed up!" );
+throw ouch;
+```
+
+
+在此之前的代码段中的,自定义错误对象,将像对待任何其他真正的错误对象一样，包括捕获`堆栈`(`stack`)。 这是一个很大的进步！
+
+### new.target
+
+ES6引入了一个新的概念，称为元属性(`meta property`)（见第7章），以`new.target`的形式。
+
+如果这看起来很奇怪，它是`; `将关键字与一个`.`配对。 并且属性名称肯定是JS的一种不寻常的模式。
+
+`new.target`是一个在所有函数中可用的新的“魔术值”，尽管在正常函数中它总是`undefined`。 在任何构造函数中，`new.target`总是指向`new `实际上直接调用的构造函数，即使构造函数在父类中，并且由子构造函数的`super(..)`调用委托。 试想一下：
+
+
+```
+class Foo {
+    constructor() {
+        console.log( "Foo: ", new.target.name );
+    }
+}
+
+class Bar extends Foo {
+    constructor() {
+        super();
+        console.log( "Bar: ", new.target.name );
+    }
+    baz() {
+        console.log( "baz: ", new.target );
+    }
+}
+
+var a = new Foo();
+// Foo: Foo
+
+var b = new Bar();
+// Foo: Bar   <-- respects the `new` call-site
+// Bar: Bar
+
+b.baz();
+// baz: undefined
+```
+
+new.target元属性在类构造函数中没有太大的用处，除了访问`静态属性/方法`（参见下一节）。
+
+如果`new.target`未定义，则知道函数未使用`new`调用。 然后，如果必要，您可以强制执行`new `调用。
+
+### static
+当子类`Bar`扩展父类`Foo`时，我们已经观察到`Bar.prototype`是`[[Prototype]]` - 链接到`Foo.prototype`。 但另外，`Bar()`是`[[Prototype]]` - 链接到`Foo()`。 这部分可能没有这样明显的推理。
+
+但是，在为一个类声明`静态方法`（而不仅仅是属性）的情况下，这是非常有用的，因为它们直接添加到该类的函数对象中，而不是函数对象的原型对象。 试想一下：
+```
+class Foo {
+    static cool() { console.log( "cool" ); }
+    wow() { console.log( "wow" ); }
+}
+
+class Bar extends Foo {
+    static awesome() {
+        super.cool();
+        console.log( "awesome" );
+    }
+    neat() {
+        super.wow();
+        console.log( "neat" );
+    }
+}
+
+Foo.cool();                 // "cool"
+Bar.cool();                 // "cool"
+Bar.awesome();              // "cool"
+                            // "awesome"
+
+var b = new Bar();
+b.neat();                   // "wow"
+                            // "neat"
+
+b.awesome;                  // undefined
+b.cool;                     // undefined
+```
+
+注意不要混淆`static `成员在类的原型链上。 它们实际上是在函数构造函数之间的`双/平行`链。
+
+### Symbol.species Constructor  Getter
+
+`static `非常有用的一个地方是为派生（子）类设置`Symbol.species` getter（在规范中在内部被称为`@@species`）。 这种能力允许子类向父类发信号通知什么构造函数应该使用 - 当不打算子类的构造函数本身 - 如果任何父类方法需要实例化一个新的实例。
+
+例如，`Array`上的许多方法创建并返回一个新的`Array`实例。 如果你从`Array`定义一个派生类，但是你希望这些方法继续提供实际的Array实例，而不是你的派生类，这是有效的：
+
+```
+class MyCoolArray extends Array {
+    // force `species` to be parent constructor
+    static get [Symbol.species]() { return Array; }
+}
+
+var a = new MyCoolArray( 1, 2, 3 ),
+    b = a.map( function(v){ return v * 2; } );
+
+b instanceof MyCoolArray;   // false
+b instanceof Array;         // true
+```
+
+为了说明父类方法如何使用一个子类的species 声明有点像`Array＃map(..)`在做，请试想一下：
+
+```
+class Foo {
+    // defer `species` to derived constructor
+    static get [Symbol.species]() { return this; }
+    spawn() {
+        return new this.constructor[Symbol.species]();
+    }
+}
+
+class Bar extends Foo {
+    // force `species` to be parent constructor
+    static get [Symbol.species]() { return Foo; }
+}
+
+var a = new Foo();
+var b = a.spawn();
+b instanceof Foo;                   // true
+
+var x = new Bar();
+var y = x.spawn();
+y instanceof Bar;                   // false
+y instanceof Foo;                   // true
+```
+
+正如你通常期望的,父类`Symbol.species`确实`return this`推迟到任何派生类。 `Bar`然后覆盖,以便于手动声明`Foo`以用于此类实例创建。 当然，派生类仍然可以使用新的`new this.constructor(..)`来声明实例。
+
+
+## Review
+
+ES6引入了几个有助于代码组织的新功能：
+
+- `Iterators `提供对数据或操作的顺序访问。 他们可以通过新的语言功能，如`for..o`f和`...`.
+- `Generators` 是由``Iterators ``控制的本地暂停/恢复功能。 它们可以用于以编程方式（并且通过`yield / next(..)`消息传递）交互地生成要通过迭代的值。
+- `Modules `允许使用公开导出的`API`对实现细节进行`私有封装`。 模块定义是基于文件的，单例，并在编译时`静态解析`。
+- `Classes `在基于原型的编码上提供更清晰的语法。 添加`super`也解决了在`[[Prototype]]`链中的相对引用的棘手问题。
+
+这些新工具应该是你，尝试通过采用ES6来改进JS项目的架构的第一站。
