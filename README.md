@@ -24,7 +24,7 @@
   - [语法(下)（100%）](https://xiaomiwujiecao.com/page/575.html)
 
 - 第三章
-    - [组织化（95%）](https://xiaomiwujiecao.com/page/576.html)
+    - [组织化（100%）](https://xiaomiwujiecao.com/page/576.html)
 
 - 第四章
   - [异步控制流（100%）](https://xiaomiwujiecao.com/page/553.html)
